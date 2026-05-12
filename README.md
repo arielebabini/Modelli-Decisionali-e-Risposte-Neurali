@@ -1,73 +1,33 @@
-# EEG-Based Decision Making Classification using Iowa Gambling Task
+# Development Branch – EEG IGT Project
 
-## Project Overview
+## Purpose of this Branch
 
-This project was developed for the course:
+This branch (`dev`) is used as the main development and integration environment for the project.
 
-**Interfacce Uomo-Macchina – A.A. 2025/2026**  
-Università degli Studi dell'Insubria
-
-The objective of the project is to develop a complete EEG signal processing and machine learning pipeline capable of classifying decision-making states during the Iowa Gambling Task (IGT).
-
-The project is based on the scientific dataset described in:
-
-> Chávez-Sánchez M. et al.  
-> *Behavioral and electroencephalographic dataset simultaneously acquired during the Iowa Gambling Task*  
-> Scientific Data, 2026.
+All team members must:
+- develop their features on dedicated feature branches;
+- test their code locally;
+- merge stable and working code into `dev`;
+- avoid pushing unfinished or broken code directly to `main`.
 
 ---
 
-# Objective
+# Development Workflow
 
-The goal is to classify:
+## Main Branches
 
-- **Advantageous decisions**
-vs
-- **Disadvantageous decisions**
-
-using EEG activity recorded before the subject’s decision during the Iowa Gambling Task.
-
-The classification is performed using EEG windows extracted before each decision event.
+| Branch | Purpose |
+|---|---|
+| `main` | Stable final version |
+| `dev` | Shared integration branch |
 
 ---
 
-# Dataset
+# Feature Branches
 
-Dataset source:
+Each member works on their own branch.
 
-- Iowa Gambling Task EEG Dataset
-- 59 healthy participants
-- 21 EEG channels
-- Sampling rate: 256 Hz
-- Behavioral + EEG synchronized data
+## EEG Preprocessing
 
-Dataset includes:
-
-- Raw EEG recordings
-- Preprocessed EEG
-- Behavioral IGT data
-- Decision timestamps (`EEG SAMPLE`)
-- Demographic information
-
----
-
-# Project Pipeline
-
-The implemented workflow includes:
-
-## 1. EEG Preprocessing
-
-- EEG loading
-- Re-referencing
-- Band-pass filtering (0.5–70 Hz)
-- Notch filtering
-- Artifact removal using ICA
-
----
-
-## 2. EEG Synchronization
-
-Behavioral IGT events are synchronized with EEG signals using the provided:
-
-```text
-EEG SAMPLE
+```bash
+feature/preprocessing-eeg
