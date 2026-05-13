@@ -1,3 +1,0 @@
-subject_id,n_trials_total,n_epochs,n_advantageous,n_disadvantageous,epoch_shape
-s-01,200,200,102,98,"(158, 21, 513)"
-s-02,200,200,94,106,"(158, 21, 513)"

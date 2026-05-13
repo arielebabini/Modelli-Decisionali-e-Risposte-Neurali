@@ -358,7 +358,8 @@ def run_ica(
         n_components=n_components,
         method="fastica",
         random_state=random_state,
-        max_iter=800,
+        max_iter=1500,
+        fit_params={"tol": 1e-4},
         verbose=False
     )
 
@@ -465,10 +466,17 @@ def sync_eeg_igt(
     df["EEG_SAMPLE_INT"] = df[eeg_col].astype(int)
     df["EEG_TIME_S"] = df["EEG_SAMPLE_INT"] / SFREQ
 
-    # Genera label da DECK
-    deck_col = "DECK" if "DECK" in df.columns else None
+    # Genera label da DECK/DECISION (gestisce varianti di nome del dataset reale)
+    deck_col = None
+    for candidate in ["DECK", "DECISION", "CARD", "CHOICE"]:
+        if candidate in df.columns:
+            deck_col = candidate
+            break
     if deck_col is None:
-        raise ValueError("Colonna DECK non trovata nel file IGT.")
+        raise ValueError(
+            f"Colonna deck non trovata. Colonne disponibili: {list(df.columns)}"
+        )
+    logger.info(f"  Colonna deck identificata: '{deck_col}'")
 
     df["LABEL"] = df[deck_col].map(DECK_LABEL_MAP)
     if df["LABEL"].isna().any():
