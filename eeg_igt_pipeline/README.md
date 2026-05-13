@@ -2,162 +2,309 @@
 
 Pipeline di preprocessing EEG per il progetto universitario *Interfacce Uomo-Macchina*, a.a. 2025/26 – Università degli Studi dell'Insubria.
 
-**Dataset**: Chávez-Sánchez et al., *Scientific Data* (2026) – [Mendeley Data](https://data.mendeley.com/datasets/2pw2m39yct/2)
+> **Corso:** Interfacce Uomo-Macchina | **Docente:** Prof.ssa Silvia Corchs  
+> **Dataset:** Chávez-Sánchez et al., *Scientific Data* (2026) – [Mendeley Data](https://data.mendeley.com/datasets/2pw2m39yct/2)  
+> **Parte del progetto:** Preprocessing EEG + Sincronizzazione + Estrazione epoche
 
 ---
 
-## Struttura del progetto
+## Indice
+
+1. [Requisiti di sistema](#1-requisiti-di-sistema)
+2. [Clonare il repository](#2-clonare-il-repository)
+3. [Configurare l'ambiente Python](#3-configurare-lambiente-python)
+4. [Scaricare il dataset](#4-scaricare-il-dataset)
+5. [Struttura del progetto](#5-struttura-del-progetto)
+6. [Eseguire la pipeline](#6-eseguire-la-pipeline)
+7. [Pipeline dettagliata](#7-pipeline-dettagliata)
+8. [Output prodotti](#8-output-prodotti)
+9. [Caricamento dati per ML](#9-caricamento-dati-per-ml)
+10. [Debug e risoluzione problemi](#10-debug-e-risoluzione-problemi)
+11. [Riferimenti](#11-riferimenti)
+
+---
+
+## 1. Requisiti di sistema
+
+| Requisito | Versione minima | Note |
+|---|---|---|
+| Python | 3.10 | Verificare con `python3 --version` |
+| pip | 23.0 | Aggiornare con `pip install --upgrade pip` |
+| RAM | 8 GB | Consigliati 16 GB per elaborare tutti i 59 soggetti |
+| Spazio disco | ~4 GB | ~3 GB dataset + ~500 MB output |
+| OS | macOS / Linux / Windows | Testato su macOS |
+
+---
+
+## 2. Clonare il repository
+
+```bash
+git clone https://github.com/<username>/<nome-repo>.git
+cd <nome-repo>/eeg_igt_pipeline
+```
+
+---
+
+## 3. Configurare l'ambiente Python
+
+È fortemente consigliato usare un **ambiente virtuale** per isolare le dipendenze.
+
+### macOS / Linux
+
+```bash
+# Crea l'ambiente virtuale
+python3 -m venv venv
+
+# Attivalo
+source venv/bin/activate
+
+# Installa le dipendenze
+pip install -r requirements.txt
+```
+
+### Windows
+
+```bash
+# Crea l'ambiente virtuale
+python -m venv venv
+
+# Attivalo
+venv\Scripts\activate
+
+# Installa le dipendenze
+pip install -r requirements.txt
+```
+
+> ⚠️ **Ogni volta che apri un nuovo terminale** devi riattivare l'ambiente con `source venv/bin/activate` (macOS/Linux) o `venv\Scripts\activate` (Windows).
+
+### Verifica installazione
+
+```bash
+python3 -c "import mne; print('MNE version:', mne.__version__)"
+python3 -c "import numpy; print('NumPy version:', numpy.__version__)"
+```
+
+### Dipendenze principali
+
+| Libreria | Versione | Ruolo |
+|---|---|---|
+| `mne` | ≥ 1.6 | Core EEG: raw, filtering, ICA, epochs |
+| `numpy` | ≥ 1.24 | Array multidimensionali |
+| `pandas` | ≥ 2.0 | Gestione dati tabulari (IGT) |
+| `scipy` | ≥ 1.11 | DSP (Welch PSD) |
+| `matplotlib` | ≥ 3.7 | Visualizzazioni diagnostiche |
+| `scikit-learn` | ≥ 1.3 | Classificatori ML (fase successiva) |
+
+---
+
+## 4. Scaricare il dataset
+
+Il dataset **non è incluso nel repository** (3 GB). Va scaricato manualmente.
+
+### Passo 1 — Scarica da Mendeley Data
+
+Vai su: **https://data.mendeley.com/datasets/2pw2m39yct/2**
+
+Clicca **"Download All"** (non è necessario creare un account).
+
+### Passo 2 — Posiziona il dataset
+
+Il dataset scaricato si chiama `An electroencephalographic and behavioral dataset/`.  
+Spostalo dentro `data/igt_eeg_dataset/` in modo da ottenere questa struttura:
+
+```
+eeg_igt_pipeline/
+└── data/
+    └── igt_eeg_dataset/
+        ├── participants.csv
+        ├── s-01/
+        │   ├── EEG.csv
+        │   ├── IGT.csv
+        │   └── processed_EEG.csv
+        ├── s-02/
+        └── s-59/
+```
+
+Da terminale (se il dataset è in Downloads):
+
+```bash
+mkdir -p ./data/igt_eeg_dataset
+mv ~/Downloads/"An electroencephalographic and behavioral dataset"/* ./data/igt_eeg_dataset/
+```
+
+### Passo 3 — Verifica
+
+```bash
+ls ./data/igt_eeg_dataset/       # deve mostrare s-01, s-02, ..., participants.csv
+ls ./data/igt_eeg_dataset/s-01/  # deve mostrare EEG.csv, IGT.csv, processed_EEG.csv
+```
+
+---
+
+## 5. Struttura del progetto
 
 ```
 eeg_igt_pipeline/
 ├── src/
 │   ├── eeg_preprocessing.py          ← pipeline principale (modulare)
-│   └── generate_synthetic_dataset.py ← generatore dati sintetici (testing)
+│   └── generate_synthetic_dataset.py ← generatore dati sintetici per testing
 ├── eeg_igt_preprocessing.ipynb       ← notebook interattivo step-by-step
-├── requirements.txt
-├── data/                             ← (da creare) dataset reale o sintetico
-└── output/
-    ├── epochs/                       ← .npy per soggetto
-    └── figures/                      ← figure diagnostiche
+├── requirements.txt                  ← dipendenze Python
+├── README.md                         ← questo file
+├── .gitignore
+├── data/                             ← ⚠️ NON nel repo — da scaricare (vedi §4)
+└── output/                           ← ⚠️ NON nel repo — generato dalla pipeline
+    ├── epochs/                       ← file .npy per soggetto
+    ├── figures/                      ← figure diagnostiche PNG
+    └── pipeline_summary.csv
 ```
 
 ---
 
-## Installazione
+## 6. Eseguire la pipeline
+
+### Opzione A — Riga di comando (consigliata)
 
 ```bash
-pip install -r requirements.txt
-```
+# Attiva il venv (se non già attivo)
+source venv/bin/activate
 
-Dipendenze principali:
-
-| Libreria | Ruolo |
-|---|---|
-| `mne` ≥ 1.6 | Core EEG: raw, filtering, ICA, epochs |
-| `numpy` | Array multidimensionali |
-| `pandas` | Gestione dati tabulari (IGT) |
-| `scipy` | DSP (Welch PSD) |
-| `matplotlib` | Visualizzazioni diagnostiche |
-| `scikit-learn` | (downstream) classificatori ML |
-
----
-
-## Quick start
-
-### Test con dati sintetici (senza dataset reale)
-
-```bash
-# Genera 5 soggetti sintetici
-python src/generate_synthetic_dataset.py --output ./data/synthetic --n_subjects 5
-
-# Esegui la pipeline
-python src/eeg_preprocessing.py \
-    --dataset ./data/synthetic \
-    --output  ./output \
-    --limit   2          # solo 2 soggetti per prova rapida
-```
-
-### Con il dataset reale Mendeley
-
-1. Scarica il dataset da https://data.mendeley.com/datasets/2pw2m39yct/2
-2. Estrai in `./data/igt_eeg_dataset/`
-3. Esegui:
-
-```bash
-python src/eeg_preprocessing.py \
+# Tutti i 59 soggetti (~20-40 minuti)
+python3 src/eeg_preprocessing.py \
     --dataset ./data/igt_eeg_dataset \
     --output  ./output
+
+# Solo i primi N soggetti (test rapido)
+python3 src/eeg_preprocessing.py \
+    --dataset ./data/igt_eeg_dataset \
+    --output  ./output \
+    --limit   3
+
+# Senza figure (più veloce)
+python3 src/eeg_preprocessing.py \
+    --dataset ./data/igt_eeg_dataset \
+    --output  ./output \
+    --no-figures
 ```
 
-### Notebook interattivo
+### Opzione B — Test con dati sintetici (senza dataset reale)
 
 ```bash
+# Genera soggetti sintetici
+python3 src/generate_synthetic_dataset.py \
+    --output ./data/synthetic \
+    --n_subjects 5
+
+# Esegui la pipeline
+python3 src/eeg_preprocessing.py \
+    --dataset ./data/synthetic \
+    --output  ./output \
+    --limit   2
+```
+
+### Opzione C — Notebook interattivo
+
+```bash
+pip install jupyter
 jupyter notebook eeg_igt_preprocessing.ipynb
 ```
 
+Nel notebook modifica la cella di configurazione:
+```python
+DATASET_ROOT = './data/igt_eeg_dataset'   # dataset reale
+OUTPUT_DIR   = './output'
+```
+
+### Argomenti della pipeline
+
+| Argomento | Default | Descrizione |
+|---|---|---|
+| `--dataset` | obbligatorio | Percorso alla directory root del dataset |
+| `--output` | `./output` | Directory dove salvare gli output |
+| `--no-figures` | False | Disabilita la generazione di figure PNG |
+| `--limit` | None | Elabora solo i primi N soggetti |
+
+### Output atteso (esempio 1 soggetto)
+
+```
+INFO | Trovati 59 soggetti in ./data/igt_eeg_dataset
+INFO | Elaborazione soggetto: s-01
+INFO |   EEG caricato: (270336, 21) (campioni × canali)
+INFO |   IGT caricato: 200 trial
+INFO |   Re-referencing: Common Average Reference (CAR)
+INFO |   Bandpass FIR: 0.5–70.0 Hz
+INFO |   Notch filter: 50.0 Hz
+INFO |   ICA fittato (15 componenti)
+INFO |   Componenti EOG escluse: [0, 1]
+INFO |   Normalizzazione z-score per canale applicata
+INFO |   Sincronizzazione: 200/200 trial validi
+INFO |   Epoche estratte: 200 | shape: (21, 513)
+INFO |   Salvato: output/epochs/s-01_*.npy  (shape X=(200, 21, 513))
+INFO | PIPELINE COMPLETATA: 1/1 soggetti elaborati
+```
+
 ---
 
-## Pipeline dettagliata
+## 7. Pipeline dettagliata
 
-### Step 1 – Caricamento
+### Step 1 — Caricamento
+Scansiona le cartelle `s-XX`, carica `EEG.csv` (µV, 21 canali) e `IGT.csv` (colonne: `decision`, `EEG sample`, `win`, `lose`, `balance`). Gestisce automaticamente varianti nei nomi di colonne e file.
 
-La funzione `discover_subjects()` scansiona la directory root cercando cartelle con pattern `s-XX`.
-Per ogni soggetto vengono caricati:
-- `{sid}_eeg.csv` → matrice `(n_campioni × 21 canali)` in µV
-- `{sid}_igt.csv` → DataFrame con colonne `DECK`, `EEG_SAMPLE`, `WIN`, `LOSS`, `RT`
+### Step 2 — Re-referencing (CAR)
+**Common Average Reference**: ogni canale viene rireferenziato sottraendo la media istantanea di tutti gli elettrodi. Riduce artefatti comuni e la dipendenza dal riferimento di acquisizione originale (Pz).
 
-### Step 2 – Re-referencing
-
-Viene applicato il **Common Average Reference (CAR)**: ogni canale viene rireferenziato sottraendo la media istantanea di tutti gli elettrodi. Questo riduce artefatti comuni (es. movimento) e migliora la localizzazione delle sorgenti.
-
-Il paper usa Pz come riferimento di acquisizione; il CAR è la scelta standard per analisi ERP e classificazione.
-
-### Step 3 – Filtraggio
+### Step 3 — Filtraggio
 
 | Filtro | Parametri | Motivazione |
 |---|---|---|
-| Bandpass FIR | 0.5–70 Hz | Preserva δ/θ/α/β/γ, rimuove deriva DC e HF |
-| Notch FIR | 50 Hz (60 Hz USA/MEX) | Rimuove interferenza rete elettrica |
+| Bandpass FIR | 0.5–70 Hz | Preserva δ/θ/α/β/γ, rimuove deriva DC e rumore HF |
+| Notch FIR | 50 Hz | Rimuove interferenza rete elettrica |
 
-Il paper originale usa un filtro IIR di 6° ordine a 0.5–70 Hz con notch a 60 Hz. La pipeline usa FIR (MNE default) per fase lineare e minore distorsione dei transienti.
+> ⚠️ Il dataset è stato acquisito in Messico (rete a 60 Hz). Se la PSD mostra un picco residuo a 60 Hz, modifica `NOTCH_FREQ = 60.0` in `eeg_preprocessing.py`.
 
-### Step 4 – ICA (artifact removal)
+### Step 4 — ICA (artifact removal)
+FastICA con 15 componenti. Le componenti correlate agli artefatti oculari (blink, movimenti) vengono identificate automaticamente tramite correlazione con `Fp1`, `Fp2`, `Fpz` e rimosse.
 
-L'**Independent Component Analysis** decompone il segnale in sorgenti indipendenti.
-Le componenti correlate ai movimenti oculari (blink, saccadi) vengono identificate automaticamente tramite correlazione con i canali frontali `Fp1`, `Fp2`, `Fpz` e rimosse.
+### Step 5 — Normalizzazione
+**Z-score per canale**: `z = (x − µ) / σ`. Riduce la variabilità inter-soggetto nelle ampiezze EEG.
 
-Componenti tipicamente escluse:
-- **Blink**: ampiezza elevata, simmetrica su Fp1/Fp2, morfologia a campana
-- **Movimenti orizzontali**: polarità opposta Fp1 vs Fp2
-- Artefatti muscolari (EMG): attività HF > 30 Hz
+### Step 6 — Sincronizzazione EEG–IGT
+`t_decisione [s] = EEG_SAMPLE / 256 Hz`
 
-### Step 5 – Normalizzazione
+### Step 7 — Estrazione epoche
+Finestra **[-2s, 0s]** prima della decisione. Cattura Slow Cortical Potentials, theta frontale e Decision Preceding Negativity.  
+Risultato: `(200 trial × 21 canali × 513 timepoints)` per soggetto.
 
-**Z-score per canale**: `z = (x − µ) / σ`
+### Step 8 — Label generation
 
-Riduce la variabilità inter-soggetto (le ampiezze EEG variano di fattore 2–5× tra individui) e migliora la convergenza dei classificatori ML.
-
-### Step 6 – Sincronizzazione EEG–IGT
-
-La colonna `EEG_SAMPLE` nel file IGT indica il campione EEG esatto in cui è avvenuta la decisione.
-
-```
-t_decisione [s] = EEG_SAMPLE / 256
-```
-
-### Step 7 – Estrazione epoche
-
-Finestra: **[-2s, 0s]** relativa al momento della decisione.
-
-**Motivazione neuroscientifica**: la finestra pre-decisionale cattura:
-- **Slow Cortical Potentials** (SCP) in Fz: buildup ~1–2s prima
-- **Attività theta frontale** (4–8 Hz): working memory e controllo cognitivo
-- **Decision Preceding Negativity** (DPN) in Fz: circa -500ms
-
-Risultato per soggetto: tensore `(n_trial × 21 canali × 512 timepoints)`
-
-### Step 8 – Label generation
-
-| Deck | Tipo | Label |
+| Deck | Classe | Label |
 |---|---|---|
-| A, B | Disadvantageous (rischiosi, perdite a lungo termine) | `0` |
-| C, D | Advantageous (sicuri, guadagni a lungo termine) | `1` |
+| A, B | Disadvantageous (perdite lungo termine) | `0` |
+| C, D | Advantageous (guadagni lungo termine) | `1` |
 
-### Step 9 – Output
+---
 
-Per ogni soggetto vengono salvati:
+## 8. Output prodotti
 
 ```
-output/epochs/
-├── s-01_epochs.npy    # (n_epochs, 21, 512) float32
-├── s-01_labels.npy    # (n_epochs,) int
-├── s-01_samples.npy   # (n_epochs,) int – indici campione originali
-└── s-01_info.npz      # metadati: ch_names, sfreq, tmin, tmax
+output/
+├── pipeline_summary.csv          ← riepilogo per tutti i soggetti
+├── epochs/
+│   ├── s-01_epochs.npy           ← (200, 21, 513) float
+│   ├── s-01_labels.npy           ← (200,) int — 0=disadv, 1=adv
+│   ├── s-01_samples.npy          ← (200,) int — indici campione originali
+│   ├── s-01_info.npz             ← metadati (ch_names, sfreq, tmin, tmax)
+│   └── ...
+└── figures/
+    ├── s-01_psd_pre_filter.png   ← PSD prima del filtraggio
+    ├── s-01_psd_post_filter.png  ← PSD dopo il filtraggio
+    ├── s-01_raw_vs_clean.png     ← segnale prima/dopo preprocessing
+    └── s-01_erp_mean.png         ← ERP medio per classe
 ```
 
 ---
 
-## Caricamento per ML (downstream)
+## 9. Caricamento dati per ML
 
 ```python
 import numpy as np
@@ -168,20 +315,18 @@ epochs_dir = Path('./output/epochs')
 all_X, all_y, all_subjects = [], [], []
 for label_file in sorted(epochs_dir.glob('*_labels.npy')):
     sid = label_file.stem.replace('_labels', '')
-    X_s = np.load(epochs_dir / f'{sid}_epochs.npy')  # (n, 21, 512)
+    X_s = np.load(epochs_dir / f'{sid}_epochs.npy')  # (200, 21, 513)
     y_s = np.load(label_file)
     all_X.append(X_s)
     all_y.append(y_s)
     all_subjects.extend([sid] * len(y_s))
 
-X = np.concatenate(all_X, axis=0)   # (N_total, 21, 512)
-y = np.concatenate(all_y, axis=0)   # (N_total,)
-subjects = np.array(all_subjects)   # per cross-validation leave-one-subject-out
+X = np.concatenate(all_X, axis=0)   # (N_totale, 21, 513)
+y = np.concatenate(all_y, axis=0)   # (N_totale,)
+subjects = np.array(all_subjects)   # per LOSO cross-validation
 ```
 
-### Consiglio per la validazione
-
-Dato che i dati fisiologici sono strettamente soggetto-dipendenti, usa la strategia **Leave-One-Subject-Out (LOSO)**:
+### Validazione raccomandata — LOSO
 
 ```python
 from sklearn.model_selection import LeaveOneGroupOut
@@ -190,44 +335,38 @@ logo = LeaveOneGroupOut()
 for train_idx, test_idx in logo.split(X, y, groups=subjects):
     X_train, X_test = X[train_idx], X[test_idx]
     y_train, y_test = y[train_idx], y[test_idx]
-    # ... addestra e valuta classificatore
+    # → addestra classificatore su X_train, valuta su X_test
 ```
 
 ---
 
-## Debug e suggerimenti
+## 10. Debug e risoluzione problemi
+
+### La pipeline non trova i file
+- Verifica che le cartelle si chiamino `s-XX` (es. `s-01`, `s-10`)
+- Controlla: `ls ./data/igt_eeg_dataset/s-01/`
+
+### Errore "Colonna DECISION non trovata"
+- Controlla i nomi colonne: `head -2 ./data/igt_eeg_dataset/s-01/IGT.csv`
+
+### Warning "FastICA did not converge"
+- Non blocca la pipeline. Aumenta `max_iter` in `eeg_preprocessing.py` se necessario.
+
+### Picco a 60 Hz nel segnale
+- Modifica `NOTCH_FREQ = 60.0` in `eeg_preprocessing.py`
 
 ### Controllo shape dati
 ```python
-# EEG
-assert eeg_data.ndim == 2
-assert eeg_data.shape[1] == 21, f"Atteso 21 canali, trovato {eeg_data.shape[1]}"
-
-# Epoche
-X = epochs.get_data()
-assert X.shape[1] == 21       # canali
-assert X.shape[2] == 512      # 2s × 256Hz
+X = np.load('output/epochs/s-01_epochs.npy')
+print(X.shape)   # atteso: (200, 21, 513)
 ```
-
-### La pipeline non trova i file EEG/IGT
-- Verifica la struttura cartelle: ogni soggetto deve avere una cartella `s-XX/`
-- Il codice tenta nomi alternativi (`eeg_raw.csv`, `EEG.csv`, ecc.)
-- Controlla con `load_eeg_csv(subject_dir, subject_id)` singolarmente
-
-### L'ICA non rimuove abbastanza artefatti
-- Aumenta `N_ICA_COMPONENTS` (default 15)
-- Abbassa la soglia in `find_bads_eog(..., threshold=2.5)`
-- Per ispezione manuale usa `ica.plot_sources(raw)` nel notebook
-
-### Poche epoche per soggetto
-- Verifica che `EEG_SAMPLE` non abbia offset (moltiplicazione per 256 Hz)
-- Controlla la colonna con `sync_df[['EEG_SAMPLE_INT', 'EEG_TIME_S', 'VALID']].describe()`
 
 ---
 
-## Riferimenti
+## 11. Riferimenti
 
 - Chávez-Sánchez et al. (2026). *Scientific Data*, 13:359. https://doi.org/10.1038/s41597-026-06662-0
 - Bechara et al. (1994). *Cognition*, 50, 7–15.
 - Cui et al. (2013). *Frontiers in Human Neuroscience*, 7, 776.
 - Bianchin & Angrilli (2011). *Brain and Cognition*, 75, 273–280.
+- Gramfort et al. (2013). *Frontiers in Neuroscience*, 7, 267. (MNE-Python)
