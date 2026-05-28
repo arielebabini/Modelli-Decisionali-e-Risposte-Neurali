@@ -3,10 +3,16 @@
 # ============================================================
 data/
 
-# ============================================================
-# Output (rigenerato dalla pipeline)
-# ============================================================
+# Output pipeline (rigenerato automaticamente – non committare)
 output/
+pipeline_output/
+ml_results/
+ml_results_*/
+
+# File pesanti generati dalla pipeline
+*.npy
+*.npz
+*.joblib
 
 # ============================================================
 # Ambiente virtuale Python

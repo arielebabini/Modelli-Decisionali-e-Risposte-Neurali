@@ -1,0 +1,10 @@
+{
+  "venvPath": ".",
+  "venv": "venv",
+  "pythonVersion": "3.14",
+  "include": ["src", "run_pipeline.py"],
+  "exclude": ["venv", "pipeline_output", "data", "output", "ml_results*"],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false
+}

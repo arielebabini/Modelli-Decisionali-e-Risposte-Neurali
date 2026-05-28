@@ -24,26 +24,43 @@ import time
 import logging
 import argparse
 from pathlib import Path
+from typing import Optional
+
+# Rich – output terminale premium
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.text import Text
+from rich import box as rbox
+from rich.logging import RichHandler
+from rich.style import Style
 
 # ---------------------------------------------------------------------------
-# Logging condiviso
+# Logging condiviso con Rich
 # ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s  %(levelname)s | %(message)s",
-    datefmt="%H:%M:%S",
+    format="%(message)s",
+    datefmt="[%H:%M:%S]",
+    handlers=[RichHandler(rich_tracebacks=True, markup=True, show_path=False)]
 )
-logger = logging.getLogger("orchestrator")
+logger  = logging.getLogger("orchestrator")
+console = Console()
 
 
 # ---------------------------------------------------------------------------
 # Utility: stampa sezione
 # ---------------------------------------------------------------------------
 def _section(title: str) -> None:
-    bar = "=" * 60
-    logger.info(bar)
-    logger.info(f"  {title}")
-    logger.info(bar)
+    """Stampa un pannello Rich per separare visivamente le sezioni principali."""
+    console.print()
+    console.print(Panel(
+        f"[bold white]{title}[/bold white]",
+        border_style="#1A56A0",
+        expand=False,
+        padding=(0, 2),
+    ))
+    console.print()
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +96,7 @@ def step_generate_synthetic(
     )
 
     elapsed = time.time() - t0
-    logger.info(f"Dataset sintetico pronto in {elapsed:.1f}s → {Path(output).resolve()}")
+    logger.info(f"Dataset sintetico generato in {elapsed:.1f}s  ({n_subjects} soggetti)")
     return output
 
 
@@ -90,7 +107,7 @@ def step_preprocessing(
     dataset_root: str,
     output_dir: str,
     save_figures: bool,
-    subject_limit: int | None,
+    subject_limit: Optional[int],
 ) -> str:
     """
     Esegue il preprocessing EEG su tutti i soggetti del dataset.
@@ -124,10 +141,7 @@ def step_preprocessing(
 
     n_ok = len(summary_df)
     elapsed = time.time() - t0
-    logger.info(
-        f"Preprocessing completato: {n_ok} soggetti in {elapsed:.1f}s "
-        f"→ {Path(output_dir).resolve()}"
-    )
+    logger.info(f"Preprocessing completato: {n_ok} soggetti in {elapsed:.1f}s")
 
     if n_ok == 0:
         raise RuntimeError(
@@ -170,7 +184,10 @@ def step_ml(
     _section("STEP 2 – Feature Extraction + Machine Learning")
     t0 = time.time()
 
-    logger.info(f"Caricamento epoche da: {Path(input_dir).resolve()}")
+    _ep_dir = Path(input_dir) / "epochs"
+    _ep_search = _ep_dir if _ep_dir.is_dir() else Path(input_dir)
+    _n_files = len(list(_ep_search.glob("*_epochs.npy")))
+    logger.info(f"Caricamento epoche preprocessate ({_n_files} soggetti)...")
     epochs_data, labels, subject_ids = load_preprocessed_data(input_dir)
 
     summary_df = run_pipeline(
@@ -185,24 +202,43 @@ def step_ml(
     )
 
     elapsed = time.time() - t0
-    logger.info(f"ML pipeline completata in {elapsed:.1f}s → {Path(output_dir).resolve()}")
+    logger.info(f"ML pipeline completata in {elapsed:.1f}s")
 
-    # Riepilogo finale compatto
+    # Riepilogo finale con tabella Rich
     metric_keys = ["accuracy", "precision", "recall", "f1", "roc_auc"]
-    print("\n" + "=" * 65)
-    print(f"  {'RISULTATI FINALI (media ± std) — ' + cv_strategy.upper()}")
-    print("=" * 65)
-    header = f"  {'Modello':<24}" + "".join(f"  {m[:7]:>9}" for m in metric_keys)
-    print(header)
-    print("  " + "-" * (len(header) - 2))
+
+    table = Table(
+        title=f"[bold white]Risultati Finali – {cv_strategy.upper()}[/bold white]",
+        box=rbox.HEAVY_HEAD,
+        show_header=True,
+        header_style="bold white on #1A56A0",
+        border_style="#5B8DD9",
+        expand=False,
+        padding=(0, 1),
+    )
+    table.add_column("Modello", style="bold", min_width=22, no_wrap=True)
+    for ml in ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]:
+        table.add_column(ml, justify="center", min_width=15)
+
+    import numpy as np
+
+    def _sty(v: float) -> str:
+        if np.isnan(v): return "dim"
+        if v >= 0.75:   return "bold green"
+        if v >= 0.60:   return "yellow"
+        return "red"
+
     for model in summary_df.index:
-        row = f"  {model:<24}"
+        cells: list = [model]
         for m in metric_keys:
             mean_v = summary_df.loc[model, f"{m}_mean"]
             std_v  = summary_df.loc[model, f"{m}_std"]
-            row += f"  {mean_v:.3f}±{std_v:.3f}"
-        print(row)
-    print("=" * 65 + "\n")
+            cells.append(Text(f"{mean_v:.3f} \u00b1 {std_v:.3f}", style=_sty(mean_v)))
+        table.add_row(*cells)
+
+    console.print()
+    console.print(table)
+    console.print()
 
 
 # ---------------------------------------------------------------------------
@@ -341,11 +377,17 @@ Esempi d'uso:
     root_out.mkdir(parents=True, exist_ok=True)
 
     total_start = time.time()
-    logger.info("=" * 60)
-    logger.info("  ORCHESTRATORE EEG-IGT – AVVIO")
-    logger.info(f"  Modalità : {args.mode.upper()}")
-    logger.info(f"  Output   : {root_out}")
-    logger.info("=" * 60)
+    console.print()
+    console.print(Panel(
+        f"[bold white]ORCHESTRATORE EEG-IGT[/bold white]\n"
+        f"Modalit\u00e0 : [cyan]{args.mode.upper()}[/cyan]\n"
+        f"Output   : [dim]{root_out}[/dim]",
+        title="[bold #1A56A0]EEG-IGT Pipeline[/bold #1A56A0]",
+        border_style="#1A56A0",
+        expand=False,
+        padding=(0, 2),
+    ))
+    console.print()
 
     # ---- STEP 0: Generazione dataset (solo modalità synthetic) ----
     if args.mode == "synthetic":
@@ -376,12 +418,15 @@ Esempi d'uso:
     )
 
     total_elapsed = time.time() - total_start
-    logger.info("=" * 60)
-    logger.info(f"  PIPELINE COMPLETA in {total_elapsed:.1f}s")
-    logger.info(f"  Output root : {root_out}")
-    logger.info(f"  Preprocessing: {preproc_dir}")
-    logger.info(f"  ML results  : {ml_dir}")
-    logger.info("=" * 60)
+    console.print()
+    console.print(Panel(
+        f"✅ [bold green]PIPELINE COMPLETA[/bold green] in [cyan]{total_elapsed:.1f}s[/cyan]\n"
+        f"Output : [dim]{root_out}[/dim]",
+        border_style="green",
+        expand=False,
+        padding=(0, 2),
+    ))
+    console.print()
 
 
 if __name__ == "__main__":

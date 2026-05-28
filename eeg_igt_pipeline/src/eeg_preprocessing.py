@@ -27,7 +27,7 @@ import re
 import warnings
 import logging
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -78,7 +78,7 @@ N_ICA_COMPONENTS = 15  # componenti ICA da stimare
 # 1. CARICAMENTO DATASET
 # ===========================================================================
 
-def discover_subjects(root_dir: str) -> list[str]:
+def discover_subjects(root_dir: str) -> List[str]:
     """
     Scansiona la directory root e restituisce la lista ordinata delle
     directory soggetto (pattern 's-XX').
@@ -90,7 +90,7 @@ def discover_subjects(root_dir: str) -> list[str]:
 
     Returns
     -------
-    list[str]
+    List[str]
         Lista di percorsi assoluti alle directory dei soggetti.
     """
     root = Path(root_dir)
@@ -101,7 +101,7 @@ def discover_subjects(root_dir: str) -> list[str]:
         [str(p) for p in root.iterdir()
          if p.is_dir() and re.match(r"s-\d+", p.name)]
     )
-    logger.info(f"Trovati {len(subjects)} soggetti in {root_dir}")
+    logger.info(f"Trovati {len(subjects)} soggetti")
     return subjects
 
 
@@ -358,8 +358,8 @@ def run_ica(
         n_components=n_components,
         method="fastica",
         random_state=random_state,
-        max_iter=1500,
-        fit_params={"tol": 1e-4},
+        max_iter=3000,            # aumentato da 1500: riduce ConvergenceWarning
+        fit_params={"tol": 1e-3}, # tolleranza leggermente più larga (robustezza su sintetici)
         verbose=False
     )
 
@@ -569,6 +569,13 @@ def extract_epochs(
     labels = valid_trials["LABEL"].values
     sample_indices = valid_trials["EEG_SAMPLE_INT"].values
 
+    # MNE può scartare epoche (event_repeated, bordi del segnale, ecc.)
+    # epochs.selection contiene gli indici degli eventi effettivamente tenuti.
+    # È fondamentale allineare labels e sample_indices di conseguenza.
+    if hasattr(epochs, "selection") and len(epochs.selection) < len(labels):
+        labels        = labels[epochs.selection]
+        sample_indices = sample_indices[epochs.selection]
+
     logger.info(
         f"  Epoche estratte: {len(epochs)} "
         f"| shape per epoca: {epochs.get_data().shape[1:]}"
@@ -628,7 +635,7 @@ def save_subject_output(
         "epochs": str(out / f"{subject_id}_epochs.npy"),
         "labels": str(out / f"{subject_id}_labels.npy"),
     }
-    logger.info(f"  Salvato: {out}/{subject_id}_*.npy  (shape X={X.shape})")
+    logger.info(f"  ✓ {subject_id}_*.npy  shape={X.shape}")
     return paths
 
 
@@ -724,7 +731,7 @@ def plot_raw_vs_clean(
     fname = fig_dir / f"{subject_id}_raw_vs_clean.png"
     plt.savefig(fname, dpi=120)
     plt.close(fig)
-    logger.info(f"  Figura salvata: {fname}")
+    logger.info(f"  ✓ {fname.name}")
 
 
 def plot_psd(
@@ -759,7 +766,7 @@ def plot_psd(
     fname = fig_dir / f"{subject_id}_psd_{label}.png"
     plt.savefig(fname, dpi=120)
     plt.close(fig)
-    logger.info(f"  PSD salvata: {fname}")
+    logger.info(f"  ✓ {fname.name}")
 
 
 def plot_epoch_mean(
@@ -803,7 +810,7 @@ def plot_epoch_mean(
     fname = fig_dir / f"{subject_id}_erp_mean.png"
     plt.savefig(fname, dpi=120)
     plt.close(fig)
-    logger.info(f"  ERP medio salvato: {fname}")
+    logger.info(f"  ✓ {fname.name}")
 
 
 # ===========================================================================
@@ -842,9 +849,7 @@ def process_subject(
     -------
     dict con statistiche oppure None in caso di errore.
     """
-    logger.info(f"\n{'='*50}")
-    logger.info(f"Elaborazione soggetto: {subject_id}")
-    logger.info(f"{'='*50}")
+    logger.info(f"\n  ▶  {subject_id}")
 
     try:
         # --- 1. Caricamento ---
@@ -951,10 +956,7 @@ def run_full_pipeline(
     summary_path = Path(output_dir) / "pipeline_summary.csv"
     summary_df.to_csv(summary_path, index=False)
 
-    logger.info(f"\n{'='*50}")
-    logger.info(f"PIPELINE COMPLETATA: {len(all_stats)}/{len(subjects)} soggetti elaborati")
-    logger.info(f"Riepilogo salvato: {summary_path}")
-    logger.info(f"{'='*50}")
+    logger.info(f"\nCompletato: {len(all_stats)}/{len(subjects)} soggetti  ✓  pipeline_summary.csv")
 
     return summary_df
 

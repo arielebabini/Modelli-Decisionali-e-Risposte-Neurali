@@ -42,6 +42,7 @@ from scipy.signal import welch
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import seaborn as sns
 
 from sklearn.pipeline import Pipeline
@@ -56,9 +57,24 @@ from sklearn.metrics import (
 )
 import joblib
 
+# Rich – output terminale premium
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.text import Text
+from rich import box as rbox
+from rich.logging import RichHandler
+
 warnings.filterwarnings("ignore")
-logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
-logger = logging.getLogger(__name__)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    datefmt="[%H:%M:%S]",
+    handlers=[RichHandler(rich_tracebacks=True, markup=True, show_path=False)]
+)
+logger  = logging.getLogger(__name__)
+console = Console()
 
 # ---------------------------------------------------------------------------
 # COSTANTI GLOBALI
@@ -81,6 +97,64 @@ CH_NAMES = [
     "Fp1", "Fp2", "Fpz", "P3", "P4",
     "T4", "T5", "T6", "Pz"
 ]
+
+# ---------------------------------------------------------------------------
+# Palette colori – stile pubblicazione scientifica
+# ---------------------------------------------------------------------------
+PALETTE       = ["#1A56A0", "#C0392B", "#1E8449"]   # blu, rosso, verde
+PALETTE_LIGHT = ["#AED6F1", "#F1948A", "#A9DFBF"]   # versioni chiare (fill/band)
+
+
+def _setup_plot_style() -> None:
+    """
+    Configura lo stile matplotlib per grafici di qualità
+    pubblicazione scientifica (light theme pulito, tipografia leggibile).
+    Chiamare all'inizio di ogni funzione di plot.
+    """
+    plt.rcParams.update({
+        # Figure
+        "figure.facecolor":    "white",
+        "figure.edgecolor":    "white",
+        # Assi
+        "axes.facecolor":      "#F7F9FC",
+        "axes.edgecolor":      "#AAAAAA",
+        "axes.linewidth":      0.8,
+        "axes.grid":           True,
+        "axes.spines.top":     False,
+        "axes.spines.right":   False,
+        # Griglia
+        "grid.color":          "#DDDDDD",
+        "grid.linewidth":      0.6,
+        "grid.alpha":          0.9,
+        "grid.linestyle":      "--",
+        # Font
+        "font.family":         "sans-serif",
+        "font.size":           11,
+        "axes.titlesize":      13,
+        "axes.titleweight":    "bold",
+        "axes.titlepad":       10,
+        "axes.labelsize":      11,
+        "axes.labelpad":       6,
+        "xtick.labelsize":     10,
+        "ytick.labelsize":     10,
+        "xtick.direction":     "out",
+        "ytick.direction":     "out",
+        # Linee
+        "lines.linewidth":     2.2,
+        "lines.antialiased":   True,
+        # Legenda
+        "legend.frameon":      True,
+        "legend.framealpha":   0.92,
+        "legend.edgecolor":    "#CCCCCC",
+        "legend.fontsize":     10,
+        "legend.title_fontsize": 10,
+        # Salvataggio
+        "savefig.dpi":         200,
+        "savefig.facecolor":   "white",
+        "savefig.bbox":        "tight",
+        "savefig.pad_inches":  0.15,
+    })
+
 
 # ============================================================================
 # SEZIONE 1 – FEATURE EXTRACTION (PSD)
@@ -292,8 +366,8 @@ def _run_single_fold(
     test_subject = np.unique(subject_ids[test_idx])
 
     if len(np.unique(y_train)) < 2:
-        print(f"  [Fold {fold_idx+1}/{total_folds}] SKIP – una sola classe in train "
-              f"(sogg. test: {test_subject})")
+        print(f"  \u26a0  [Fold {fold_idx+1}/{total_folds}] SKIP – una sola classe "
+              f"in train (sogg. test: {test_subject})")
         return None
 
     fold_results = {}
@@ -328,11 +402,13 @@ def _run_single_fold(
             "roc_entry": roc_entry,
         }
 
-    summary = " | ".join(
-        f"{n}: Acc={fold_results[n]['accuracy']:.3f} AUC={fold_results[n]['roc_auc']:.3f}"
+    summary_parts = [
+        f"{n}: Acc={fold_results[n]['accuracy']:.3f}  AUC={fold_results[n]['roc_auc']:.3f}"
         for n in fold_results
-    )
-    print(f"  [Fold {fold_idx+1:>2}/{total_folds}] Test={test_subject} | {summary}")
+    ]
+    subj_str = "/".join(str(s) for s in test_subject)
+    print(f"  \u2714  Fold {fold_idx+1:>2}/{total_folds}  subj={subj_str:>4}  "
+          + "  |  ".join(summary_parts))
     return fold_results
 
 
@@ -373,7 +449,12 @@ def run_cross_validation(
     results  : dict {model_name: {metric: list_of_fold_scores}}
     roc_data : dict {model_name: [(fpr, tpr, auc), ...]}
     """
-    from joblib import Parallel, delayed
+    # Usa sklearn.utils.parallel se disponibile (sklearn >= 1.3, Python 3.11+),
+    # altrimenti fallback su joblib (sklearn < 1.3)
+    try:
+        from sklearn.utils.parallel import Parallel, delayed
+    except ImportError:
+        from joblib import Parallel, delayed
     import multiprocessing
 
     if cv_strategy == "loso":
@@ -393,7 +474,7 @@ def run_cross_validation(
     logger.info("(I log dei fold arriveranno fuori ordine – normale con parallelismo)\n")
 
     # Esecuzione parallela: ogni fold è indipendente
-    fold_results_list = Parallel(n_jobs=n_jobs, backend="loky", verbose=0)(
+    fold_results_list = Parallel(n_jobs=n_jobs, verbose=0)(
         delayed(_run_single_fold)(
             fold_idx, train_idx, test_idx,
             X, y, subject_ids, models, total_folds
@@ -458,24 +539,44 @@ def compute_summary_table(
 
     df = pd.DataFrame(rows).set_index("Model")
 
-    # Tabella formattata per stampa
-    print("\n" + "="*80)
-    print("RIEPILOGO RISULTATI (media ± std)")
-    print("="*80)
-    for m in metric_keys:
-        col_mean = f"{m}_mean"
-        col_std  = f"{m}_std"
-        if col_mean in df.columns:
-            print(f"\n{m.upper()}")
-            for model in df.index:
-                mean_val = df.loc[model, col_mean]
-                std_val  = df.loc[model, col_std]
-                print(f"  {model:<25}: {mean_val:.3f} ± {std_val:.3f}")
+    # ---- Tabella Rich per terminale ----
+    table = Table(
+        title="[bold white]Riepilogo Risultati – Media \u00b1 Std[/bold white]",
+        box=rbox.ROUNDED,
+        show_header=True,
+        header_style="bold white on #1A56A0",
+        border_style="#5B8DD9",
+        expand=False,
+        padding=(0, 1),
+        title_style="bold",
+    )
+    table.add_column("Modello", style="bold", min_width=22, no_wrap=True)
+    for ml in ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]:
+        table.add_column(ml, justify="center", min_width=15)
+
+    def _score_style(v: float) -> str:
+        if np.isnan(v): return "dim"
+        if v >= 0.75:   return "bold green"
+        if v >= 0.60:   return "yellow"
+        return "red"
+
+    for model in df.index:
+        cells: list = [model]
+        for m in metric_keys:
+            mean_v = df.loc[model, f"{m}_mean"]
+            std_v  = df.loc[model, f"{m}_std"]
+            cell   = Text(f"{mean_v:.3f} \u00b1 {std_v:.3f}", style=_score_style(mean_v))
+            cells.append(cell)
+        table.add_row(*cells)
+
+    console.print()
+    console.print(table)
+    console.print()
 
     if output_dir:
         path = Path(output_dir) / "results_summary.csv"
         df.to_csv(path)
-        logger.info(f"Tabella risultati salvata: {path}")
+        logger.info("  ✓ results_summary.csv")
 
     return df
 
@@ -495,71 +596,89 @@ def plot_confusion_matrices(
 ) -> None:
     """
     Genera e salva la confusion matrix aggregata per ogni modello.
-
-    La CM è la somma di tutte le CM dei fold → rappresenta la performance globale.
-
-    Parameters
-    ----------
-    X, y, subject_ids : dati
-    models            : dict modelli (verranno ri-fittati qui)
-    output_dir        : directory dove salvare le figure
+    Stile: light theme scientifico, annotazioni doppie (% + conteggio assoluto).
     """
+    _setup_plot_style()
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    if cv_strategy == "loso":
-        cv = LeaveOneGroupOut()
-    else:
-        cv = GroupKFold(n_splits=n_splits)
+    cv = LeaveOneGroupOut() if cv_strategy == "loso" else GroupKFold(n_splits=n_splits)
 
-    label_names = ["Disadvantageous\n(A/B)", "Advantageous\n(C/D)"]
-    n_models = len(models)
-    fig, axes = plt.subplots(1, n_models, figsize=(5 * n_models, 4))
-
-    if n_models == 1:
-        axes = [axes]
+    label_names = ["Disadv. (A/B)", "Advan. (C/D)"]
+    n_models    = len(models)
 
     # Accumula CM per fold
     cm_totals = {name: np.zeros((2, 2), dtype=int) for name in models}
-
     for train_idx, test_idx in cv.split(X, y, groups=subject_ids):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
-
         if len(np.unique(y_train)) < 2:
             continue
-
         for model_name, pipeline in models.items():
             pipeline.fit(X_train, y_train)
             y_pred = pipeline.predict(X_test)
             cm_totals[model_name] += confusion_matrix(y_test, y_pred, labels=[0, 1])
 
-    # Plot
-    for ax, (model_name, cm) in zip(axes, cm_totals.items()):
-        # Normalizza per riga (recall per classe)
-        cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
+    # Layout figure
+    fig, axes = plt.subplots(
+        1, n_models,
+        figsize=(4.8 * n_models, 5.0),
+        constrained_layout=True
+    )
+    if n_models == 1:
+        axes = [axes]
 
+    cmap = sns.light_palette("#1A56A0", n_colors=256, as_cmap=True)
+
+    for ax, (model_name, cm) in zip(axes, cm_totals.items()):
+        total   = cm.sum()
+        acc     = np.trace(cm) / total if total > 0 else 0.0
+        cm_norm = cm.astype(float) / (cm.sum(axis=1, keepdims=True) + 1e-9)
+
+        # Heatmap senza annotazioni automatiche
         sns.heatmap(
-            cm_norm, annot=True, fmt=".2f", cmap="Blues",
-            xticklabels=label_names, yticklabels=label_names,
-            ax=ax, vmin=0, vmax=1,
-            annot_kws={"size": 11}
+            cm_norm,
+            annot=False,
+            cmap=cmap,
+            xticklabels=label_names,
+            yticklabels=label_names,
+            ax=ax,
+            vmin=0, vmax=1,
+            linewidths=2.0,
+            linecolor="white",
+            cbar_kws={"shrink": 0.72, "label": "Recall per classe"},
         )
-        # Sovrascrivi annotazioni con conteggi assoluti
+
+        # Annotazioni manuali: % grande + conteggio assoluto piccolo
         for i in range(2):
             for j in range(2):
-                ax.text(j + 0.5, i + 0.65, f"(n={cm[i,j]})",
-                        ha="center", va="center", fontsize=8, color="gray")
+                pct        = cm_norm[i, j]
+                cnt        = cm[i, j]
+                text_color = "white" if pct > 0.58 else "#1a1a1a"
+                ax.text(j + 0.5, i + 0.38, f"{pct:.1%}",
+                        ha="center", va="center",
+                        fontsize=16, fontweight="bold", color=text_color)
+                ax.text(j + 0.5, i + 0.63, f"n = {cnt}",
+                        ha="center", va="center",
+                        fontsize=9, color=text_color, alpha=0.80)
 
-        ax.set_title(f"{model_name}\n(normalizzata per riga)", fontsize=10)
-        ax.set_xlabel("Predetto", fontsize=9)
-        ax.set_ylabel("Vero", fontsize=9)
+        ax.set_title(model_name, fontsize=12, fontweight="bold", pad=10)
+        ax.set_xlabel("Predetto", fontsize=10, labelpad=6)
+        ax.set_ylabel("Vero", fontsize=10, labelpad=6)
+        ax.tick_params(left=False, bottom=False)
 
-    plt.suptitle("Confusion Matrix – Aggregata LOSO", fontsize=12, y=1.02)
-    plt.tight_layout()
+        # Accuracy globale sotto ogni subplot
+        ax.text(0.5, -0.16, f"Accuracy globale: {acc:.1%}",
+                ha="center", transform=ax.transAxes,
+                fontsize=10, color="#444444")
+
+    fig.suptitle(
+        "Confusion Matrix – Aggregata per Fold (LOSO)",
+        fontsize=14, fontweight="bold", y=1.04
+    )
     path = Path(output_dir) / "confusion_matrices.png"
-    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.savefig(path, dpi=200, bbox_inches="tight")
     plt.close()
-    logger.info(f"Confusion matrices salvate: {path}")
+    logger.info("  ✓ confusion_matrices.png")
 
 
 def plot_roc_curves(
@@ -567,66 +686,76 @@ def plot_roc_curves(
     output_dir: str
 ) -> None:
     """
-    Genera la curva ROC media con deviazione standard per ogni modello.
-
-    Interpola le TPR su una griglia comune di FPR [0,1],
-    poi calcola media e ±1 std.
-
-    Parameters
-    ----------
-    roc_data   : output di run_cross_validation {model: [(fpr, tpr, auc_val),...]}
-    output_dir : str
+    Curva ROC media ± std per ogni modello.
+    Stile: light theme scientifico, bande di confidenza, riferimento casuale.
     """
+    _setup_plot_style()
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(7, 6))
 
-    mean_fpr = np.linspace(0, 1, 200)
-    colors = ["#2196F3", "#F44336", "#4CAF50"]
+    fig, ax = plt.subplots(figsize=(7.5, 6.5))
+    mean_fpr = np.linspace(0, 1, 300)
 
-    for (model_name, fold_rocs), color in zip(roc_data.items(), colors):
+    for (model_name, fold_rocs), color, color_light in zip(
+        roc_data.items(), PALETTE, PALETTE_LIGHT
+    ):
         if not fold_rocs:
             continue
 
-        # Interpola tutte le TPR su griglia comune
-        tprs_interp = []
-        aucs = []
+        tprs_interp, aucs = [], []
         for fpr, tpr, auc_val in fold_rocs:
-            tprs_interp.append(np.interp(mean_fpr, fpr, tpr))
-            tprs_interp[-1][0] = 0.0
+            interped    = np.interp(mean_fpr, fpr, tpr)
+            interped[0] = 0.0
+            tprs_interp.append(interped)
             aucs.append(auc_val)
 
-        mean_tpr = np.mean(tprs_interp, axis=0)
-        mean_tpr[-1] = 1.0
-        std_tpr = np.std(tprs_interp, axis=0)
-
-        mean_auc = np.mean(aucs)
-        std_auc  = np.std(aucs)
+        mean_tpr      = np.mean(tprs_interp, axis=0)
+        mean_tpr[-1]  = 1.0
+        std_tpr       = np.std(tprs_interp, axis=0)
+        mean_auc      = np.mean(aucs)
+        std_auc       = np.std(aucs)
 
         # Curva media
-        ax.plot(mean_fpr, mean_tpr, color=color, lw=2,
-                label=f"{model_name} (AUC={mean_auc:.3f} ± {std_auc:.3f})")
-
+        ax.plot(
+            mean_fpr, mean_tpr,
+            color=color, lw=2.5, zorder=3,
+            label=f"{model_name}\n  AUC = {mean_auc:.3f} \u00b1 {std_auc:.3f}"
+        )
         # Banda ±1 std
-        ax.fill_between(mean_fpr,
-                        np.clip(mean_tpr - std_tpr, 0, 1),
-                        np.clip(mean_tpr + std_tpr, 0, 1),
-                        alpha=0.15, color=color)
+        ax.fill_between(
+            mean_fpr,
+            np.clip(mean_tpr - std_tpr, 0, 1),
+            np.clip(mean_tpr + std_tpr, 0, 1),
+            alpha=0.15, color=color, zorder=2
+        )
+        # Marcatore sul punto mediano
+        mid = np.searchsorted(mean_fpr, 0.3)
+        ax.plot(mean_fpr[mid], mean_tpr[mid], "o",
+                color=color, ms=7, zorder=4, markeredgecolor="white",
+                markeredgewidth=0.8)
 
-    # Linea casuale
-    ax.plot([0, 1], [0, 1], "k--", lw=1, label="Classificatore casuale (AUC=0.5)")
-    ax.set_xlabel("False Positive Rate", fontsize=11)
-    ax.set_ylabel("True Positive Rate", fontsize=11)
-    ax.set_title("ROC Curve – Media ± Std (LOSO)", fontsize=12)
-    ax.legend(loc="lower right", fontsize=9)
-    ax.grid(alpha=0.3)
-    ax.set_xlim([0, 1])
-    ax.set_ylim([0, 1.02])
+    # Linea di riferimento casuale
+    ax.plot([0, 1], [0, 1], "--", color="#AAAAAA", lw=1.4,
+            label="Casuale  (AUC = 0.500)", zorder=1)
+    ax.fill_between([0, 1], [0, 1], alpha=0.04, color="gray")
 
-    plt.tight_layout()
+    ax.set_xlabel("False Positive Rate  (1 \u2013 Specificit\u00e0)", fontsize=11)
+    ax.set_ylabel("True Positive Rate  (Sensibilit\u00e0)", fontsize=11)
+    ax.set_title("Curva ROC \u2013 Media \u00b1 Std (LOSO)",
+                 fontsize=13, fontweight="bold")
+    ax.set_xlim([-0.01, 1.01])
+    ax.set_ylim([-0.01, 1.04])
+    ax.legend(
+        loc="lower right", fontsize=10,
+        title="Modelli", title_fontsize=10,
+        framealpha=0.93, edgecolor="#CCCCCC"
+    )
+    ax.text(0.52, 0.05, "No Skill", color="#AAAAAA",
+            fontsize=9, rotation=39, va="bottom")
+
     path = Path(output_dir) / "roc_curves.png"
-    plt.savefig(path, dpi=150)
+    plt.savefig(path, dpi=200)
     plt.close()
-    logger.info(f"ROC curves salvate: {path}")
+    logger.info("  ✓ roc_curves.png")
 
 
 def plot_feature_importance(
@@ -637,86 +766,116 @@ def plot_feature_importance(
     top_n: int = 20
 ) -> None:
     """
-    Addestra Random Forest e Logistic Regression sull'intero dataset
-    e visualizza le top-N feature più importanti.
+    Feature importance: Random Forest (Gini) e Logistic Regression (|\u03b2|).
+    Stile: light theme scientifico, barre con intensit\u00e0 proporzionale al valore.
 
-    NB: questo plot è puramente esplicativo (non per evaluation).
-        Per evaluation usa sempre la CV.
-
-    Parameters
-    ----------
-    X, y           : dati completi
-    feature_names  : lista nomi feature
-    output_dir     : str
-    top_n          : int – quante feature mostrare
+    NB: puramente esplicativo (non per evaluation).
     """
+    _setup_plot_style()
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
-    # --- Random Forest Importance ---
-    scaler = StandardScaler()
+    scaler   = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
+    # --- Random Forest ---
     rf = RandomForestClassifier(
         n_estimators=300, class_weight="balanced",
         random_state=RANDOM_SEED, n_jobs=-1
     )
     rf.fit(X_scaled, y)
     importances = rf.feature_importances_
-    std_imp = np.std([t.feature_importances_ for t in rf.estimators_], axis=0)
+    std_imp     = np.std([t.feature_importances_ for t in rf.estimators_], axis=0)
 
-    top_idx_rf = np.argsort(importances)[-top_n:][::-1]
-    top_names_rf = [feature_names[i] for i in top_idx_rf]
+    top_idx_rf   = np.argsort(importances)[-top_n:]          # crescente
+    top_names_rf = [feature_names[i] for i in top_idx_rf]   # dal meno al più importante
     top_vals_rf  = importances[top_idx_rf]
     top_std_rf   = std_imp[top_idx_rf]
 
-    axes[0].barh(range(top_n), top_vals_rf[::-1], xerr=top_std_rf[::-1],
-                 align="center", color="#4CAF50", alpha=0.8, ecolor="gray")
-    axes[0].set_yticks(range(top_n))
-    axes[0].set_yticklabels(top_names_rf[::-1], fontsize=8)
-    axes[0].set_xlabel("Importanza (Gini)", fontsize=10)
-    axes[0].set_title(f"Random Forest – Top {top_n} Feature", fontsize=11)
-    axes[0].grid(axis="x", alpha=0.3)
-
-    # --- Logistic Regression Coefficients ---
+    # --- Logistic Regression ---
     lr = LogisticRegression(
         max_iter=2000, class_weight="balanced",
         random_state=RANDOM_SEED, C=1.0
     )
     lr.fit(X_scaled, y)
-    coefs = lr.coef_[0]  # shape (n_features,)
+    coefs = lr.coef_[0]
 
-    top_idx_lr = np.argsort(np.abs(coefs))[-top_n:][::-1]
+    top_idx_lr   = np.argsort(np.abs(coefs))[-top_n:]        # crescente
     top_names_lr = [feature_names[i] for i in top_idx_lr]
-    top_coefs_lr  = coefs[top_idx_lr]
+    top_coefs_lr = coefs[top_idx_lr]
 
-    colors_lr = ["#2196F3" if c > 0 else "#F44336" for c in top_coefs_lr[::-1]]
-    axes[1].barh(range(top_n), top_coefs_lr[::-1],
-                 align="center", color=colors_lr, alpha=0.8)
+    # ---- Layout ----
+    fig, axes = plt.subplots(1, 2, figsize=(17, 6.5), constrained_layout=True)
+
+    # --- RF: colormap proporzionale all'importanza ---
+    norm_vals = top_vals_rf / (top_vals_rf.max() + 1e-9)
+    cmap_rf   = plt.cm.Blues
+    colors_rf = [cmap_rf(0.35 + 0.55 * v) for v in norm_vals]
+
+    axes[0].barh(
+        range(top_n), top_vals_rf,
+        xerr=top_std_rf,
+        align="center",
+        color=colors_rf,
+        edgecolor="white",
+        linewidth=0.5,
+        error_kw={"elinewidth": 1.2, "ecolor": "#888888", "capsize": 3}
+    )
+    axes[0].set_yticks(range(top_n))
+    axes[0].set_yticklabels(top_names_rf, fontsize=8.5)
+    axes[0].set_xlabel("Importanza (Gini medio)", fontsize=10)
+    axes[0].set_title(f"Random Forest \u2013 Top {top_n} Feature",
+                      fontsize=12, fontweight="bold")
+    axes[0].grid(axis="x", alpha=0.5, linestyle="--")
+    axes[0].set_axisbelow(True)
+    # Valori numerici a destra
+    x_offset = top_vals_rf.max() * 0.015
+    for i, (val, err) in enumerate(zip(top_vals_rf, top_std_rf)):
+        axes[0].text(val + err + x_offset, i, f"{val:.4f}",
+                     va="center", fontsize=7.5, color="#444444")
+
+    # --- LR: blu=positivo (advantageous), rosso=negativo ---
+    norm_lr   = np.abs(top_coefs_lr) / (np.abs(top_coefs_lr).max() + 1e-9)
+    for i, (val, norm) in enumerate(zip(top_coefs_lr, norm_lr)):
+        color = PALETTE[0] if val >= 0 else PALETTE[1]
+        alpha = 0.45 + 0.50 * float(norm)
+        axes[1].barh(i, val, align="center", color=color,
+                     alpha=alpha, edgecolor="white", linewidth=0.5)
+
     axes[1].set_yticks(range(top_n))
-    axes[1].set_yticklabels(top_names_lr[::-1], fontsize=8)
-    axes[1].axvline(0, color="black", lw=0.8)
-    axes[1].set_xlabel("Coefficiente (positivo=advantageous)", fontsize=10)
-    axes[1].set_title(f"Logistic Regression – Top {top_n} Coeff. (|β|)", fontsize=11)
-    axes[1].grid(axis="x", alpha=0.3)
+    axes[1].set_yticklabels(top_names_lr, fontsize=8.5)
+    axes[1].axvline(0, color="#333333", lw=1.0, zorder=5)
+    axes[1].set_xlabel("Coefficiente \u03b2  (positivo \u2192 advantageous)", fontsize=10)
+    axes[1].set_title(f"Logistic Regression \u2013 Top {top_n} |\u03b2|",
+                      fontsize=12, fontweight="bold")
+    axes[1].grid(axis="x", alpha=0.5, linestyle="--")
+    axes[1].set_axisbelow(True)
 
-    plt.suptitle("Importanza Feature EEG per Classificazione IGT", fontsize=13, y=1.01)
-    plt.tight_layout()
+    patch_pos = mpatches.Patch(color=PALETTE[0], alpha=0.85,
+                               label="\u2192 Advantageous (C/D)")
+    patch_neg = mpatches.Patch(color=PALETTE[1], alpha=0.85,
+                               label="\u2192 Disadvantageous (A/B)")
+    axes[1].legend(handles=[patch_pos, patch_neg], fontsize=9,
+                   loc="lower right", framealpha=0.9)
+
+    fig.suptitle(
+        "Importanza Feature EEG \u2013 Classificazione Decisioni IGT",
+        fontsize=14, fontweight="bold"
+    )
     path = Path(output_dir) / "feature_importance.png"
-    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.savefig(path, dpi=200, bbox_inches="tight")
     plt.close()
-    logger.info(f"Feature importance salvata: {path}")
+    logger.info("  ✓ feature_importance.png")
 
     # Salva ranking CSV
     df_rf = pd.DataFrame({
-        "feature": [feature_names[i] for i in top_idx_rf],
+        "feature":       [feature_names[i] for i in top_idx_rf],
         "rf_importance": importances[top_idx_rf],
-        "rf_std": std_imp[top_idx_rf],
-        "lr_coef": coefs[top_idx_rf]
+        "rf_std":        std_imp[top_idx_rf],
+        "lr_coef":       coefs[top_idx_rf]
     })
     csv_path = Path(output_dir) / "feature_ranking.csv"
     df_rf.to_csv(csv_path, index=False)
-    logger.info(f"Feature ranking CSV salvato: {csv_path}")
+    logger.info("  ✓ feature_ranking.csv")
 
 
 def plot_per_fold_metrics(
@@ -724,35 +883,134 @@ def plot_per_fold_metrics(
     output_dir: str
 ) -> None:
     """
-    Boxplot delle metriche per fold, per ogni modello.
+    Box plot + strip plot delle metriche per fold, per ogni modello.
+    Usa automaticamente violin (N>=8 fold) o boxplot (N<8 fold) per evitare
+    artefatti KDE con pochi punti. I singoli fold sono sempre visibili.
     """
+    _setup_plot_style()
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    metric_keys = ["accuracy", "precision", "recall", "f1", "roc_auc"]
+
+    metric_keys   = ["accuracy", "precision", "recall", "f1", "roc_auc"]
     metric_labels = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
 
-    fig, axes = plt.subplots(1, len(metric_keys), figsize=(18, 5))
+    # Costruisci DataFrame long-form per seaborn
+    model_order = list(results.keys())
+    rows = []
+    for model_name in model_order:
+        metrics = results[model_name]
+        for metric in metric_keys:
+            for val in metrics[metric]:
+                if not np.isnan(val):
+                    rows.append({"Model": model_name, "Metric": metric, "Value": val})
+    df_long = pd.DataFrame(rows)
+
+    palette = {name: PALETTE[i % len(PALETTE)] for i, name in enumerate(model_order)}
+
+    # Etichette asse X abbreviate
+    short = {
+        "Logistic Regression": "Log.\nReg.",
+        "SVM (RBF)": "SVM",
+        "Random Forest": "Rand.\nForest",
+    }
+    tick_labels = [short.get(m, m) for m in model_order]
+
+    # Determina se usare violin (N >= 8 per fold) o boxplot (N < 8)
+    n_folds = max(
+        len([v for v in results[m]["accuracy"] if not np.isnan(v)])
+        for m in model_order
+    )
+    use_violin = n_folds >= 8
+
+    fig, axes = plt.subplots(
+        1, len(metric_keys),
+        figsize=(4.4 * len(metric_keys), 5.4),
+        constrained_layout=True
+    )
 
     for ax, metric, label in zip(axes, metric_keys, metric_labels):
-        data_plot = []
-        model_labels = []
-        for model_name, metrics in results.items():
-            vals = [v for v in metrics[metric] if not np.isnan(v)]
-            data_plot.append(vals)
-            model_labels.append(model_name.replace(" ", "\n"))
+        df_m = df_long[df_long["Metric"] == metric]
 
-        ax.boxplot(data_plot, labels=model_labels, patch_artist=True,
-                   medianprops={"color": "black", "linewidth": 2})
-        ax.set_title(label, fontsize=10)
-        ax.set_ylim([0, 1.05])
-        ax.grid(axis="y", alpha=0.3)
-        ax.tick_params(axis="x", labelsize=8)
+        if use_violin:
+            # Violin (distribuzione) – solo per N >= 8
+            sns.violinplot(
+                x="Model", y="Value", data=df_m, ax=ax,
+                palette=palette,
+                order=model_order,
+                inner=None,
+                cut=0,
+                bw_adjust=0.8,
+                linewidth=1.2,
+                saturation=0.70,
+            )
+        else:
+            # Boxplot – più robusto per N < 8 (evita artefatti KDE)
+            sns.boxplot(
+                x="Model", y="Value", data=df_m, ax=ax,
+                palette=palette,
+                order=model_order,
+                width=0.45,
+                linewidth=1.4,
+                fliersize=0,          # nascondi outlier (mostrati dallo strip)
+                saturation=0.72,
+                boxprops={"alpha": 0.75},
+                medianprops={"color": "#111111", "linewidth": 2.2},
+                whiskerprops={"linewidth": 1.2, "linestyle": "--"},
+                capprops={"linewidth": 1.4},
+            )
 
-    plt.suptitle("Distribuzione Metriche per Fold – LOSO", fontsize=12)
-    plt.tight_layout()
+        # Strip plot – punti singoli fold (sempre visibile)
+        sns.stripplot(
+            x="Model", y="Value", data=df_m, ax=ax,
+            palette=palette,
+            order=model_order,
+            size=7,
+            alpha=0.85,
+            jitter=0.12,
+            zorder=4,
+            linewidth=0.6,
+            edgecolor="white",
+        )
+
+        # Se violin: aggiungi mediana come linea nera manuale
+        if use_violin:
+            for i, name in enumerate(model_order):
+                vals = df_m[df_m["Model"] == name]["Value"].dropna()
+                if len(vals):
+                    med = vals.median()
+                    ax.hlines(med, i - 0.22, i + 0.22,
+                              colors="#111111", linewidths=2.2, zorder=5)
+
+        # Annotazione n= e media sotto ogni gruppo
+        for i, name in enumerate(model_order):
+            vals = df_m[df_m["Model"] == name]["Value"].dropna()
+            n    = len(vals)
+            mean = vals.mean() if n else float("nan")
+            ax.text(i, -0.08, f"n={n}\n\u03bc={mean:.2f}",
+                    ha="center", va="top", fontsize=7.5,
+                    color="#555555", transform=ax.get_xaxis_transform())
+
+        ax.set_title(label, fontsize=12, fontweight="bold")
+        ax.set_ylim([-0.02, 1.07])
+        ax.set_xlabel("")
+        ax.set_ylabel("Score" if metric == "accuracy" else "", fontsize=10)
+        ax.set_xticks(range(len(model_order)))
+        ax.set_xticklabels(tick_labels, fontsize=9)
+        ax.axhline(0.5, color="#BBBBBB", lw=0.9, ls=":", zorder=1)   # linea chance
+        ax.grid(axis="y", alpha=0.4, linestyle="--")
+        ax.set_axisbelow(True)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    # Etichetta tipo grafico in titolo
+    plot_type = "Violin" if use_violin else "Box"
+    fig.suptitle(
+        f"Distribuzione Metriche per Fold \u2013 LOSO  [{plot_type} plot, n={n_folds} fold]",
+        fontsize=13, fontweight="bold"
+    )
     path = Path(output_dir) / "metrics_boxplot.png"
-    plt.savefig(path, dpi=150)
+    plt.savefig(path, dpi=200)
     plt.close()
-    logger.info(f"Boxplot metriche salvato: {path}")
+    logger.info(f"  ✓ metrics_boxplot.png  [{plot_type} plot, n={n_folds} fold]")
 
 
 # ============================================================================
@@ -785,7 +1043,7 @@ def save_models(
         safe_name = model_name.lower().replace(" ", "_").replace("(", "").replace(")", "")
         path = models_dir / f"{safe_name}.joblib"
         joblib.dump(pipeline, path)
-        logger.info(f"Modello salvato: {path}")
+        logger.info(f"  ✓ {safe_name}.joblib")
 
 
 # ============================================================================
@@ -903,7 +1161,7 @@ def load_preprocessed_data(
             f"Assicurati che il preprocessing sia già stato eseguito."
         )
 
-    logger.info(f"Trovati {len(epoch_files)} soggetti in {search_dir}")
+    logger.info(f"Trovati {len(epoch_files)} soggetti")
 
     all_epochs, all_labels, all_subjects = [], [], []
 
@@ -934,9 +1192,9 @@ def load_preprocessed_data(
         all_labels.append(labels)
         all_subjects.append(np.full(len(labels), subj_idx, dtype=int))
 
+        dist = np.bincount(labels.astype(int))
         logger.info(f"  {sid}: {epochs.shape[0]} epoche  "
-                    f"[shape {epochs.shape}]  "
-                    f"label dist: {np.bincount(labels.astype(int))}")
+                    f"(adv={dist[1] if len(dist)>1 else 0}, disadv={dist[0]})")
 
     if not all_epochs:
         raise RuntimeError(
@@ -948,11 +1206,11 @@ def load_preprocessed_data(
     labels_all   = np.concatenate(all_labels,   axis=0)
     subjects_all = np.concatenate(all_subjects, axis=0)
 
-    logger.info(f"\nTotale: {epochs_data.shape[0]} epoche da "
+    dist_all = np.bincount(labels_all.astype(int))
+    logger.info(f"\nTotale: {epochs_data.shape[0]} epoche | "
+                f"adv={dist_all[1] if len(dist_all)>1 else 0}, "
+                f"disadv={dist_all[0]} | "
                 f"{len(np.unique(subjects_all))} soggetti")
-    logger.info(f"Shape array finale: {epochs_data.shape}")
-    logger.info(f"Label distribution: {np.bincount(labels_all.astype(int))} "
-                f"(0=disadv, 1=adv)")
 
     return epochs_data, labels_all, subjects_all
 
@@ -998,13 +1256,12 @@ def run_pipeline(
     summary_df : pd.DataFrame con media ± std per ogni metrica/modello
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    logger.info("\n" + "="*60)
-    logger.info("EEG ML PIPELINE – AVVIO")
-    logger.info("="*60)
-    logger.info(f"Epoche: {epochs_data.shape}")
-    logger.info(f"Labels: {np.bincount(labels)} (0=disadv, 1=adv)")
-    logger.info(f"Soggetti: {len(np.unique(subject_ids))}")
-    logger.info(f"Output: {Path(output_dir).resolve()}")
+    dist = np.bincount(labels)
+    logger.info(
+        f"Epoche: {epochs_data.shape[0]}  |  "
+        f"Soggetti: {len(np.unique(subject_ids))}  |  "
+        f"adv={dist[1] if len(dist)>1 else 0}, disadv={dist[0]}"
+    )
 
     # ---- Step 1: Feature extraction ---
     logger.info("\n[1/6] Estrazione feature PSD...")
@@ -1016,7 +1273,7 @@ def run_pipeline(
     pd.DataFrame({"feature_name": feature_names}).to_csv(
         Path(output_dir) / "feature_names.csv", index=False
     )
-    logger.info(f"Feature matrix salvata: {feat_path}")
+    logger.info("  ✓ feature_matrix.npy  feature_names.csv")
 
     # ---- Step 2: Modelli ---
     logger.info("\n[2/6] Inizializzazione modelli...")
@@ -1053,10 +1310,7 @@ def run_pipeline(
         models_final = get_models(random_state=RANDOM_SEED)
         save_models(X, labels, models_final, output_dir=output_dir)
 
-    logger.info("\n" + "="*60)
-    logger.info("PIPELINE COMPLETATA")
-    logger.info(f"Output in: {Path(output_dir).resolve()}")
-    logger.info("="*60)
+    logger.info("\nPIPELINE ML COMPLETATA ✓")
 
     return summary_df
 
