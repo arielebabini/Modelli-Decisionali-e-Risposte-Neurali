@@ -17,11 +17,13 @@ Input atteso (output di eeg_preprocessing.py):
   ├── s-02/ ...
 
 Uso standalone con dati sintetici:
-  python eeg_ml_pipeline.py --mode synthetic
+  python eeg_ml_pipeline.py --mode synthetic --n_subjects 10
 
 Uso con dati reali (output preprocessing):
   python eeg_ml_pipeline.py --mode real --input ./output --output ./ml_results
 
+Uso con GroupKFold (k=5) invece di LOSO:
+  python eeg_ml_pipeline.py --mode real --cv group_kfold --n_splits 5
 =============================================================================
 """
 
