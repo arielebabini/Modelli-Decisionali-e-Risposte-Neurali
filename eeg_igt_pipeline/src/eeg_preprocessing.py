@@ -265,12 +265,12 @@ def set_reference(raw: mne.io.BaseRaw, ref: str = "average") -> mne.io.BaseRaw:
     MNE Raw con nuovo riferimento.
     """
     if ref == "average":
-        raw_ref, _ = mne.set_eeg_reference(raw, ref_channels="average",
-                                            copy=True, verbose=False)
+        raw_ref = mne.set_eeg_reference(raw, ref_channels="average",
+                                        copy=True, verbose=False)[0]
         logger.info("  Re-referencing: Common Average Reference (CAR)")
     else:
-        raw_ref, _ = mne.set_eeg_reference(raw, ref_channels=[ref],
-                                            copy=True, verbose=False)
+        raw_ref = mne.set_eeg_reference(raw, ref_channels=[ref],
+                                        copy=True, verbose=False)[0]
         logger.info(f"  Re-referencing: {ref}")
     return raw_ref
 

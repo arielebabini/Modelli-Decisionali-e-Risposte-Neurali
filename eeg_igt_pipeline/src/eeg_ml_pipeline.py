@@ -451,12 +451,7 @@ def run_cross_validation(
     results  : dict {model_name: {metric: list_of_fold_scores}}
     roc_data : dict {model_name: [(fpr, tpr, auc), ...]}
     """
-    # Usa sklearn.utils.parallel se disponibile (sklearn >= 1.3, Python 3.11+),
-    # altrimenti fallback su joblib (sklearn < 1.3)
-    try:
-        from sklearn.utils.parallel import Parallel, delayed
-    except ImportError:
-        from joblib import Parallel, delayed
+    from joblib import Parallel, delayed
     import multiprocessing
 
     if cv_strategy == "loso":
@@ -868,12 +863,12 @@ def plot_feature_importance(
     plt.close()
     logger.info("  ✓ feature_importance.png")
 
-    # Salva ranking CSV
+    # Salva ranking CSV (indicizzato per RF; LR ha un indice diverso)
     df_rf = pd.DataFrame({
         "feature":       [feature_names[i] for i in top_idx_rf],
         "rf_importance": importances[top_idx_rf],
         "rf_std":        std_imp[top_idx_rf],
-        "lr_coef":       coefs[top_idx_rf]
+        "lr_coef":       coefs[top_idx_rf]   # coefficiente LR corrispondente alla feature RF
     })
     csv_path = Path(output_dir) / "feature_ranking.csv"
     df_rf.to_csv(csv_path, index=False)
@@ -954,10 +949,6 @@ def plot_per_fold_metrics(
                 linewidth=1.4,
                 fliersize=0,          # nascondi outlier (mostrati dallo strip)
                 saturation=0.72,
-                boxprops={"alpha": 0.75},
-                medianprops={"color": "#111111", "linewidth": 2.2},
-                whiskerprops={"linewidth": 1.2, "linestyle": "--"},
-                capprops={"linewidth": 1.4},
             )
 
         # Strip plot – punti singoli fold (sempre visibile)
