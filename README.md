@@ -499,6 +499,10 @@ La documentazione include:
 Progetto sviluppato nell'ambito del corso di **Interfaccia Uomo-Macchina**  
 Anno accademico 2025-2026 · Università degli Studi
 
+Babini Ariele - 757608
+Bottaro Federico - 758017
+Nicholas Maria - 757386
+
 ---
 
 ## Licenza
