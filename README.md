@@ -1,7 +1,7 @@
-# Modelli Decisionali e Risposte Neurali
+w# Modelli Decisionali e Risposte Neurali
 
 > **Classificazione EEG di decisioni vantaggiose e svantaggiose nell'Iowa Gambling Task (IGT)**  
-> Corso di Interfaccia Uomo-Macchina · A.A. 2025-2026 · 3° anno magistrale
+> Corso di Interfaccia Uomo-Macchina · A.A. 2025-2026 · 3° anno Triennale
 
 ---
 
